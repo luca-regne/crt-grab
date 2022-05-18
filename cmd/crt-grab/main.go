@@ -11,7 +11,15 @@ import (
 func main() {
 	domain := "hackerone.com"
 
-	crtsh(domain)
+	var subdomains []string
+
+	crtsh_subs := crtsh(domain, &subdomains)
+	log.Println("News subs from https://crt.sh:", crtsh_subs)
+
+	bufferover_subs := bufferover(domain, &subdomains)
+	log.Println("News subs from https://dns.bufferover.run:", bufferover_subs)
+
+	log.Println(len(subdomains), "subs foundeed ", subdomains)
 }
 
 type ObjCrt struct {
@@ -26,7 +34,9 @@ type ObjCrt struct {
 	SerialNumber   string `json:"serial_number"`
 }
 
-func crtsh(domain string) []string {
+func crtsh(domain string, subdomains_list *[]string) []string {
+	var new_subs []string
+
 	url := "https://crt.sh/?q=." + domain + "&output=json"
 
 	resp, err := http.Get(url)
@@ -43,16 +53,67 @@ func crtsh(domain string) []string {
 		log.Fatalln(err)
 	}
 
-	var subdomains []string
-
 	for _, val := range obj_crt {
 		for _, s := range strings.Split(val.NameValue, "\n") {
-			if !(contains(subdomains, s)) {
-				subdomains = append(subdomains, s)
+			if !(contains((*subdomains_list), s)) {
+				(*subdomains_list) = append((*subdomains_list), s)
+				new_subs = append(new_subs, s)
 			}
 		}
 	}
-	return subdomains
+
+	return new_subs
+}
+
+type ObjMeta struct {
+	Runtime   string   `json:"Runtime"`
+	Errors    *string  `json:"Errors"`
+	Message   string   `json:"Message"`
+	FileNames []string `json:"FileNames"`
+	TOS       string   `json:"TOS"`
+}
+
+type ObjBufferover struct {
+	Meta ObjMeta  `json:"Meta"`
+	FDNS []string `json:"FDNS_A"`
+	RDNS []string `json:"RDNS"`
+}
+
+func bufferover(domain string, subdomains_list *[]string) []string {
+	url := "https://dns.bufferover.run/dns?q=." + domain + "&output=json"
+
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	defer resp.Body.Close()
+
+	var obj_bufferover ObjBufferover
+
+	if err = json.NewDecoder(resp.Body).Decode(&obj_bufferover); err != nil {
+		log.Fatalln(err)
+	}
+
+	var new_subs []string
+
+	for _, val := range obj_bufferover.FDNS {
+		sub := strings.Split(val, ",")[1]
+		if !(contains((*subdomains_list), sub)) {
+			(*subdomains_list) = append((*subdomains_list), sub)
+			new_subs = append(new_subs, sub)
+		}
+	}
+
+	for _, val := range obj_bufferover.RDNS {
+		sub := strings.Split(val, ",")[1]
+		if !(contains((*subdomains_list), sub)) {
+			(*subdomains_list) = append((*subdomains_list), sub)
+			new_subs = append(new_subs, sub)
+		}
+	}
+
+	return new_subs
 }
 
 func contains(array []string, str string) bool {
